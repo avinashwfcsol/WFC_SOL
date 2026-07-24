@@ -8,10 +8,8 @@ import streamlit as st
 # CONFIG
 # ==========================================
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+DEFAULT_MODEL = "openrouter/free"   # free routing model
 
-# Use a free model by default to avoid 402 errors.
-# You can change this in Streamlit secrets as OPENROUTER_MODEL if you want.
-DEFAULT_MODEL = "deepseek/deepseek-chat-v3-0324:free"
 
 # ==========================================
 # HELPER FUNCTIONS
@@ -70,32 +68,21 @@ Do not include markdown formatting like ```json, just output the raw JSON object
                 timeout=90,
             )
 
-            # Print exact API error details for debugging
+            # Show exact OpenRouter error for debugging
             if not response.ok:
-                error_text = response.text
-                if response.status_code in (429, 500, 502, 503, 504):
-                    if i == len(api_keys) - 1:
-                        return {
-                            "is_match": False,
-                            "reasoning": f"All API keys exhausted or server error. Status: {response.status_code}. Details: {error_text}",
-                            "match_score": 0,
-                            "missing_critical_skills": [],
-                        }
-                    continue
-                else:
-                    if i == len(api_keys) - 1:
-                        return {
-                            "is_match": False,
-                            "reasoning": f"OpenRouter error {response.status_code}: {error_text}",
-                            "match_score": 0,
-                            "missing_critical_skills": [],
-                        }
-                    continue
+                if i == len(api_keys) - 1:
+                    return {
+                        "is_match": False,
+                        "reasoning": f"OpenRouter error {response.status_code}: {response.text}",
+                        "match_score": 0,
+                        "missing_critical_skills": [],
+                    }
+                continue
 
             data = response.json()
             result_text = data["choices"][0]["message"]["content"].strip()
 
-            # Remove code fences if the model adds them anyway
+            # Remove code fences if model adds them
             result_text = result_text.replace("```json", "").replace("```", "").strip()
 
             parsed = json.loads(result_text)
@@ -127,7 +114,7 @@ st.title("📄 OpenRouter-Powered Resume Screener")
 # Get model from secrets if present, otherwise use free model
 model_name = st.secrets.get("OPENROUTER_MODEL", DEFAULT_MODEL)
 
-# Securely grab ALL API keys from Streamlit Secrets
+# Collect API keys
 api_keys = []
 for idx in range(1, 10):
     key = st.secrets.get(f"OPENROUTER_API_KEY_{idx}")
@@ -163,8 +150,8 @@ if st.button("Analyze Resumes", type="primary"):
                 with st.spinner("Analyzing via OpenRouter..."):
                     evaluation = evaluate_resume(api_keys, resume_text, jd_text, model_name)
 
-                if "All API keys exhausted" in evaluation.get("reasoning", ""):
-                    st.warning("⚠️ API limit or server issue.")
+                if "OpenRouter error" in evaluation.get("reasoning", "") or "System Error" in evaluation.get("reasoning", ""):
+                    st.warning("⚠️ Error while processing this resume.")
                     st.write(f"**Details:** {evaluation.get('reasoning')}")
                 elif evaluation.get("is_match"):
                     st.success(f"✅ MATCH! (Score: {evaluation.get('match_score')}/100)")
