@@ -251,7 +251,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.title("📄 OpenRouter-Powered Resume Screener")
+st.title("📄 AI-Powered Resume Screener")
 
 model_name = st.secrets.get("OPENROUTER_MODEL", DEFAULT_MODEL)
 
