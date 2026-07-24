@@ -42,19 +42,27 @@ def evaluate_resume(client, resume_text, jd_text):
     Resume:
     {resume_text}
     """
-    try:
-        response = client.models.generate_content(
-            model='gemini-3.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=CandidateEvaluation,
-                temperature=0.0,
+    
+    # AUTO-RETRY LOGIC: Try up to 3 times if the server is busy
+    max_retries = 20
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=CandidateEvaluation,
+                    temperature=0.0,
+                )
             )
-        )
-        return json.loads(response.text)
-    except Exception as e:
-        return {"is_match": False, "reasoning": f"System Error: {str(e)}", "match_score": 0, "missing_critical_skills": []}
+            return json.loads(response.text)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(10) # Wait 10 seconds, then try this resume again
+                continue
+            # If it fails 3 times in a row, then finally return the error
+            return {"is_match": False, "reasoning": f"System Error: {str(e)}", "match_score": 0, "missing_critical_skills": []}
 
 # ==========================================
 # STREAMLIT WEB APP UI
@@ -94,7 +102,7 @@ if st.button("Analyze Resumes", type="primary"):
                 
                 # 1. Handle Server Errors gracefully
                 if "System Error" in evaluation.get("reasoning"):
-                    st.warning("⚠️ SERVER BUSY / ERROR: Google blocked this request. Please evaluate this resume again.")
+                    st.warning("⚠️ SERVER BUSY / ERROR: Google blocked this request after 3 attempts.")
                     st.write(f"**Details:** {evaluation.get('reasoning')}")
                 
                 # 2. Handle Good Matches
@@ -108,5 +116,5 @@ if st.button("Analyze Resumes", type="primary"):
                     st.write(f"**Missing Skills:** {', '.join(evaluation.get('missing_critical_skills', []))}")
                     st.write(f"**Reasoning:** {evaluation.get('reasoning')}")
                 
-                # Pause for 5 seconds so we don't trigger Google's spam filter
+                # Maintain the healthy 5-second baseline speed limit between each resume
                 time.sleep(5)
