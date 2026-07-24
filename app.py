@@ -16,6 +16,7 @@ import streamlit as st
 # ==========================================
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "openrouter/free"   # free routing model
+MATCH_THRESHOLD = 75  # used for match / reject decision
 
 
 # ==========================================
@@ -86,18 +87,24 @@ def confidence_label(score):
 
 
 def evaluate_resume(api_keys, resume_text, jd_text, model_name):
-    system_prompt = """
+    system_prompt = f"""
 You are an expert, highly critical IT Recruiter.
 
 Compare the candidate's resume against the Job Description carefully.
 Be strict and job-relevant.
 Do not assume skills that are not explicitly present in the resume.
 
+Scoring rules:
+- If none of the mandatory JD requirements are present, the score must be 0.
+- Do not give points for unrelated experience.
+- Only award points for direct, explicit relevance to the JD.
+- Be careful and do not make assumptions.
+
 Return ONLY valid JSON with these exact keys:
 
 - "candidate_name": string
 - "match_score": integer from 0 to 100
-- "is_match": boolean (true only if match_score is 75 or higher)
+- "is_match": boolean (true only if match_score is {MATCH_THRESHOLD} or higher)
 - "matched_skills": array of strings
 - "missing_critical_skills": array of strings
 - "why_matched": string
@@ -105,9 +112,9 @@ Return ONLY valid JSON with these exact keys:
 - "overall_summary": string
 - "confidence_level": string ("low", "medium", or "high")
 
-Rules:
-- If a skill is missing from the resume, treat it as missing.
-- Be careful and do not make assumptions.
+Important:
+- If the resume is matched, "why_not_matched" must be an empty string.
+- If the resume is rejected, "why_matched" must be an empty string.
 - No markdown. No code fences. Only raw JSON.
 """.strip()
 
@@ -174,17 +181,31 @@ Resume:
                 raise ValueError(f"Model output did not contain valid JSON: {result_text}")
 
             score = int(parsed.get("match_score", 0))
+            is_match = bool(parsed.get("is_match", False))
+
+            matched_skills = normalize_list(parsed.get("matched_skills", []))
+            missing_skills = normalize_list(parsed.get("missing_critical_skills", []))
+            why_matched = parsed.get("why_matched", "")
+            why_not_matched = parsed.get("why_not_matched", "")
+            overall_summary = parsed.get("overall_summary", "")
+            confidence = parsed.get("confidence_level", confidence_label(score))
+
+            # Enforce mutual exclusion of explanation fields
+            if is_match:
+                why_not_matched = ""
+            else:
+                why_matched = ""
 
             return {
                 "candidate_name": parsed.get("candidate_name", ""),
                 "match_score": score,
-                "is_match": bool(parsed.get("is_match", False)),
-                "matched_skills": normalize_list(parsed.get("matched_skills", [])),
-                "missing_critical_skills": normalize_list(parsed.get("missing_critical_skills", [])),
-                "why_matched": parsed.get("why_matched", ""),
-                "why_not_matched": parsed.get("why_not_matched", ""),
-                "overall_summary": parsed.get("overall_summary", ""),
-                "confidence_level": parsed.get("confidence_level", confidence_label(score)),
+                "is_match": is_match,
+                "matched_skills": matched_skills,
+                "missing_critical_skills": missing_skills,
+                "why_matched": why_matched,
+                "why_not_matched": why_not_matched,
+                "overall_summary": overall_summary,
+                "confidence_level": confidence,
             }
 
         except (requests.RequestException, KeyError, ValueError, json.JSONDecodeError) as e:
@@ -332,27 +353,46 @@ if st.button("Analyze Resumes", type="primary"):
                     st.warning("⚠️ Error while processing this resume.")
                     st.write(f"**Details:** {evaluation.get('reasoning')}")
                 else:
+                    # Compact result line
                     if is_match:
-                        st.success(f"✅ MATCH ({score}/100) — {candidate_name}")
-                    else:
-                        st.error(f"❌ NOT MATCHED ({score}/100) — {candidate_name}")
+                        st.success(f"✅ MATCHED ({score}/100) — {candidate_name}")
+                        st.write(f"**Candidate Name:** {candidate_name}")
+                        st.write(f"**Recommendation:** {recommendation}")
+                        st.write(f"**Confidence:** {confidence_level}")
 
-                    st.write(f"**Candidate Name:** {candidate_name}")
-                    st.write(f"**Recommendation:** {recommendation}")
-                    st.write(f"**Confidence:** {confidence_level}")
-                    st.write(f"**Why Matched:** {why_matched or 'Not provided'}")
-                    st.write(f"**Why Not Matched:** {why_not_matched or 'Not provided'}")
-                    st.write(f"**Summary:** {overall_summary or 'Not provided'}")
+                        # Only show Why Matched for matched resumes
+                        st.write(f"**Why Matched:** {why_matched or 'Not provided'}")
+                        st.write(f"**Summary:** {overall_summary or 'Not provided'}")
 
-                    if matched_skills:
-                        st.write(f"**Matched Skills:** {', '.join(matched_skills)}")
-                    else:
-                        st.write("**Matched Skills:** None found")
+                        if matched_skills:
+                            st.write(f"**Matched Skills:** {', '.join(matched_skills)}")
+                        else:
+                            st.write("**Matched Skills:** None found")
 
-                    if missing_skills:
-                        st.write(f"**Missing Skills:** {', '.join(missing_skills)}")
+                        if missing_skills:
+                            st.write(f"**Missing Skills:** {', '.join(missing_skills)}")
+                        else:
+                            st.write("**Missing Skills:** None found")
                     else:
-                        st.write("**Missing Skills:** None found")
+                        st.error(f"❌ REJECTED ({score}/100) — {candidate_name}")
+
+                        # Show only compact line; details inside dropdown
+                        with st.expander("Show rejected resume details", expanded=False):
+                            st.write(f"**Candidate Name:** {candidate_name}")
+                            st.write(f"**Recommendation:** {recommendation}")
+                            st.write(f"**Confidence:** {confidence_level}")
+                            st.write(f"**Why Not Matched:** {why_not_matched or 'Not provided'}")
+                            st.write(f"**Summary:** {overall_summary or 'Not provided'}")
+
+                            if matched_skills:
+                                st.write(f"**Matched Skills:** {', '.join(matched_skills)}")
+                            else:
+                                st.write("**Matched Skills:** None found")
+
+                            if missing_skills:
+                                st.write(f"**Missing Skills:** {', '.join(missing_skills)}")
+                            else:
+                                st.write("**Missing Skills:** None found")
 
                 rows.append({
                     "scan_date": scan_date,
@@ -360,13 +400,13 @@ if st.button("Analyze Resumes", type="primary"):
                     "file_name": file.name,
                     "match_score": score,
                     "match_percentage": f"{score}%",
-                    "match_status": "Matched" if is_match else "Not Matched",
+                    "match_status": "Matched" if is_match else "Rejected",
                     "recommendation": recommendation,
                     "confidence_level": confidence_level,
                     "matched_skills": ", ".join(matched_skills) if matched_skills else "",
                     "missing_critical_skills": ", ".join(missing_skills) if missing_skills else "",
-                    "why_matched": why_matched,
-                    "why_not_matched": why_not_matched,
+                    "why_matched": why_matched if is_match else "",
+                    "why_not_matched": why_not_matched if not is_match else "",
                     "overall_summary": overall_summary,
                 })
 
