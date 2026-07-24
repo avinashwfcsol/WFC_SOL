@@ -48,7 +48,7 @@ Do not include markdown formatting like ```json, just output the raw JSON object
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {key}",
-                "HTTP-Referer": "https://streamlit.io",
+                "HTTP-Referer": "[https://streamlit.io](https://streamlit.io)",
                 "X-Title": "AI Resume Screener",
             }
 
@@ -82,10 +82,17 @@ Do not include markdown formatting like ```json, just output the raw JSON object
             data = response.json()
             result_text = data["choices"][0]["message"]["content"].strip()
 
-            # Remove code fences if model adds them
+            # ROBUST JSON EXTRACTOR: Strip markdown and find exact brackets
             result_text = result_text.replace("```json", "").replace("```", "").strip()
-
-            parsed = json.loads(result_text)
+            
+            start_idx = result_text.find('{')
+            end_idx = result_text.rfind('}')
+            
+            if start_idx != -1 and end_idx != -1:
+                clean_json_str = result_text[start_idx:end_idx+1]
+                parsed = json.loads(clean_json_str)
+            else:
+                raise ValueError(f"Model output did not contain valid JSON: {result_text}")
 
             return {
                 "reasoning": parsed.get("reasoning", ""),
@@ -165,4 +172,5 @@ if st.button("Analyze Resumes", type="primary"):
                     st.write(f"**Missing Skills:** {', '.join(missing) if missing else 'None found'}")
                     st.write(f"**Reasoning:** {evaluation.get('reasoning')}")
 
-                time.sleep(1)
+                # Safely wait 5 seconds before checking the next resume to avoid API rate limits
+                time.sleep(5)
