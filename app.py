@@ -36,9 +36,10 @@ def extract_candidate_name(resume_text, filename):
     """
     Best-effort candidate name extraction.
     """
+    # FIXED REGEX: Moved the hyphen to the end of the character class [:\s-] to prevent PatternError
     patterns = [
-        r"(?i)\bname[:-\s]+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})",
-        r"(?i)\bcandidate name[:-\s]+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})",
+        r"(?i)\bname[:\s-]+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})",
+        r"(?i)\bcandidate name[:\s-]+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})",
     ]
     for pat in patterns:
         m = re.search(pat, resume_text)
@@ -296,7 +297,6 @@ if st.button("Analyze Resumes", type="primary"):
 
             fallback_name = extract_candidate_name(resume_text, file.name)  
             
-            # Analyze OUTSIDE the expander so we know if it's a match beforehand
             with st.spinner(f"Analyzing {file.name} via AI..."):  
                 evaluation = evaluate_resume(api_keys, resume_text, jd_text, model_name)  
 
@@ -311,7 +311,6 @@ if st.button("Analyze Resumes", type="primary"):
             confidence_level = evaluation.get("confidence_level", confidence_label(score))  
             recommendation = classify_recommendation(score)  
 
-            # Dynamic expander title and expanded state
             expander_title = f"{'✅ MATCH' if is_match else '❌ REJECTED'} - {candidate_name} ({score}/100)"
             
             with st.expander(expander_title, expanded=is_match):
@@ -323,7 +322,6 @@ if st.button("Analyze Resumes", type="primary"):
                     st.write(f"**Recommendation:** {recommendation}")  
                     st.write(f"**Confidence:** {confidence_level}")  
                     
-                    # Strictly segregate "Why Matched" and "Why Not Matched"
                     if is_match:
                         st.write(f"**Why Matched:** {why_matched or 'Details not provided'}")
                     else:
@@ -361,10 +359,8 @@ if st.button("Analyze Resumes", type="primary"):
 
             progress.progress(idx / total_files)  
 
-        # Sort from highest score to lowest score  
         rows.sort(key=lambda x: x["match_score"], reverse=True)  
 
-        # Add rank after sorting  
         for i, row in enumerate(rows, start=1):  
             row["rank"] = i  
 
