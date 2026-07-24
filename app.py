@@ -43,8 +43,8 @@ def evaluate_resume(client, resume_text, jd_text):
     {resume_text}
     """
     
-    # AUTO-RETRY LOGIC: Try up to 3 times if the server is busy
-    max_retries = 20
+    # SMART RETRY LOGIC: Limit to 10 tries, and ONLY retry on temporary 503/500 errors
+    max_retries = 10
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
@@ -58,11 +58,16 @@ def evaluate_resume(client, resume_text, jd_text):
             )
             return json.loads(response.text)
         except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(10) # Wait 10 seconds, then try this resume again
-                continue
-            # If it fails 3 times in a row, then finally return the error
-            return {"is_match": False, "reasoning": f"System Error: {str(e)}", "match_score": 0, "missing_critical_skills": []}
+            error_message = str(e)
+            
+            # If the error is 503 (Unavailable) or 500 (Internal Error), wait and retry
+            if "503" in error_message or "500" in error_message:
+                if attempt < max_retries - 1:
+                    time.sleep(10) # Wait 10 seconds, then try again
+                    continue
+            
+            # If it is ANY other error (like 429 Quota Exceeded), stop immediately and show the error!
+            return {"is_match": False, "reasoning": f"System Error: {error_message}", "match_score": 0, "missing_critical_skills": []}
 
 # ==========================================
 # STREAMLIT WEB APP UI
@@ -102,7 +107,7 @@ if st.button("Analyze Resumes", type="primary"):
                 
                 # 1. Handle Server Errors gracefully
                 if "System Error" in evaluation.get("reasoning"):
-                    st.warning("⚠️ SERVER BUSY / ERROR: Google blocked this request after 3 attempts.")
+                    st.warning("⚠️ ERROR: Google blocked this request or quota was exceeded.")
                     st.write(f"**Details:** {evaluation.get('reasoning')}")
                 
                 # 2. Handle Good Matches
