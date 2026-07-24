@@ -40,7 +40,7 @@ def evaluate_resume(api_keys, resume_text, jd_text):
     for i, key in enumerate(api_keys):
         try:
             # We use xAI's standard chat completions endpoint
-            url = "[https://api.x.ai/v1/chat/completions](https://api.x.ai/v1/chat/completions)"
+                        url = "https://api.x.ai/v1/chat/completions"
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {key}"
