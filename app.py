@@ -1,4 +1,5 @@
 import json
+import time
 import PyPDF2
 import streamlit as st
 from pydantic import BaseModel, Field
@@ -91,10 +92,21 @@ if st.button("Analyze Resumes", type="primary"):
                 with st.spinner("Analyzing with Gemini AI..."):
                     evaluation = evaluate_resume(client, resume_text, jd_text)
                 
-                if evaluation.get("is_match"):
+                # 1. Handle Server Errors gracefully
+                if "System Error" in evaluation.get("reasoning"):
+                    st.warning("⚠️ SERVER BUSY / ERROR: Google blocked this request. Please evaluate this resume again.")
+                    st.write(f"**Details:** {evaluation.get('reasoning')}")
+                
+                # 2. Handle Good Matches
+                elif evaluation.get("is_match"):
                     st.success(f"✅ MATCH! (Score: {evaluation.get('match_score')}/100)")
                     st.write(f"**Reasoning:** {evaluation.get('reasoning')}")
+                
+                # 3. Handle True Rejections
                 else:
                     st.error(f"❌ REJECTED (Score: {evaluation.get('match_score')}/100)")
                     st.write(f"**Missing Skills:** {', '.join(evaluation.get('missing_critical_skills', []))}")
                     st.write(f"**Reasoning:** {evaluation.get('reasoning')}")
+                
+                # Pause for 5 seconds so we don't trigger Google's spam filter
+                time.sleep(5)
