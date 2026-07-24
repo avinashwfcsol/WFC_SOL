@@ -183,8 +183,8 @@ No markdown. No code fences. Only raw JSON.
         gemini_error = ""
         for i, key in enumerate(gemini_keys):
             try:
-                # Using Gemini's official REST API Endpoint
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
+                # Using Gemini's official REST API Endpoint with the updated model version
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={key}"
                 
                 payload = {
                     "contents": [{
