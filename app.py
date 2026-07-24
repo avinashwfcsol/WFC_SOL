@@ -262,7 +262,7 @@ def send_email_with_csv(csv_bytes, to_email, subject, body):
 # STREAMLIT WEB APP UI
 # ==========================================
 st.set_page_config(page_title="AI Resume Screener", layout="wide")
-st.title("📄 OpenRouter-Powered Resume Screener")
+st.title("📄 AI-Powered Resume Screener")
 
 model_name = st.secrets.get("OPENROUTER_MODEL", DEFAULT_MODEL)
 
