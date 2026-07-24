@@ -84,7 +84,7 @@ def evaluate_resume(api_keys, resume_text, jd_text):
 # STREAMLIT WEB APP UI
 # ==========================================
 st.set_page_config(page_title="AI Resume Screener", layout="wide")
-st.title("📄 Grok-Powered Resume Screener")
+st.title("📄 AI-Powered Resume Screener")
 
 # Securely grab ALL API keys from Streamlit Secrets
 api_keys = []
