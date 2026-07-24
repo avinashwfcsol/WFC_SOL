@@ -36,6 +36,7 @@ def extract_candidate_name(resume_text, filename):
     """
     Best-effort candidate name extraction.
     """
+    # FIXED REGEX: Moved the hyphen to the end of the character class [:\s-] to prevent PatternError
     patterns = [
         r"(?i)\bname[:\s-]+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})",
         r"(?i)\bcandidate name[:\s-]+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})",
@@ -89,8 +90,8 @@ Return ONLY valid JSON with these exact keys:
 "candidate_name": string
 "match_score": integer from 0 to 100
 "is_match": boolean (true only if match_score is 75 or higher)
-"matched_skills": array of strings (WARNING: Only include skills explicitly written in the resume. Do not invent matches. If none, return an empty array [])
-"missing_critical_skills": array of strings (List the mandatory JD skills that are missing from the resume)
+"matched_skills": array of strings
+"missing_critical_skills": array of strings
 "why_matched": string (Provide detail ONLY if is_match is true. If false, leave as empty string)
 "why_not_matched": string (Provide detail ONLY if is_match is false. If true, leave as empty string)
 "overall_summary": string
@@ -243,18 +244,6 @@ def send_email_with_csv(csv_bytes, to_email, subject, body):
 # STREAMLIT WEB APP UI
 # ==========================================
 st.set_page_config(page_title="AI Resume Screener", layout="wide")
-
-# This hides the anchor link (🔗) next to headers
-st.markdown(
-    """
-    <style>
-    .st-emotion-cache-10trblm {display: none;}
-    a.header-anchor {display: none !important;}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
 st.title("📄 AI-Powered Resume Screener")
 
 model_name = st.secrets.get("OPENROUTER_MODEL", DEFAULT_MODEL)
