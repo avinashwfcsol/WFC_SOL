@@ -35,16 +35,18 @@ def evaluate_resume(api_keys, resume_text, jd_text):
     
     user_prompt = f"Job Description:\n{jd_text}\n\nResume:\n{resume_text}"
 
-    # API KEY ROTATION LOGIC
+    # API KEY ROTATION LOGIC FOR OPENROUTER
     for i, key in enumerate(api_keys):
         try:
-            url = "[https://api.x.ai/v1/chat/completions](https://api.x.ai/v1/chat/completions)"
+            url = "[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)"
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {key}"
+                "Authorization": f"Bearer {key}",
+                "HTTP-Referer": "[https://streamlit.io](https://streamlit.io)", # Optional for OpenRouter rankings
+                "X-Title": "AI Resume Screener"        # Optional for OpenRouter rankings
             }
             payload = {
-                "model": "grok-4.5",
+                "model": "openai/gpt-4o", # You can change this to any OpenRouter model string
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -76,17 +78,17 @@ def evaluate_resume(api_keys, resume_text, jd_text):
 # STREAMLIT WEB APP UI
 # ==========================================
 st.set_page_config(page_title="AI Resume Screener", layout="wide")
-st.title("📄 Grok-Powered Resume Screener")
+st.title("📄 OpenRouter-Powered Resume Screener")
 
 # Securely grab ALL API keys from Streamlit Secrets
 api_keys = []
 for idx in range(1, 10): 
-    key = st.secrets.get(f"GROK_API_KEY_{idx}")
+    key = st.secrets.get(f"OPENROUTER_API_KEY_{idx}")
     if key:
         api_keys.append(key)
 
 if not api_keys:
-    st.error("No API keys found! Please configure GROK_API_KEY_1 in Streamlit Secrets.")
+    st.error("No API keys found! Please configure OPENROUTER_API_KEY_1 in Streamlit Secrets.")
     st.stop()
 
 jd_text = st.text_area("Paste the Job Description (JD) here", height=200)
@@ -108,11 +110,11 @@ if st.button("Analyze Resumes", type="primary"):
                     st.error("Could not extract text from this PDF.")
                     continue
                     
-                with st.spinner("Analyzing with Grok AI..."):
+                with st.spinner("Analyzing via OpenRouter..."):
                     evaluation = evaluate_resume(api_keys, resume_text, jd_text)
                 
                 if "All API keys exhausted" in evaluation.get("reasoning", ""):
-                    st.warning("⚠️ ERROR: All provided API keys have hit their rate limits.")
+                    st.warning("⚠️ ERROR: All provided API keys have hit their limits.")
                     st.write(f"**Details:** {evaluation.get('reasoning')}")
                 elif evaluation.get("is_match"):
                     st.success(f"✅ MATCH! (Score: {evaluation.get('match_score')}/100)")
@@ -122,4 +124,4 @@ if st.button("Analyze Resumes", type="primary"):
                     st.write(f"**Missing Skills:** {', '.join(evaluation.get('missing_critical_skills', []))}")
                     st.write(f"**Reasoning:** {evaluation.get('reasoning')}")
                 
-                time.sleep(3)
+                time.sleep(2)
