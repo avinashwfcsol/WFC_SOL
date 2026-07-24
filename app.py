@@ -79,7 +79,7 @@ def confidence_label(score):
         return "medium"
     return "low"
 
-def evaluate_resume(api_keys, resume_text, jd_text, model_name):
+def evaluate_resume(openrouter_keys, gemini_keys, resume_text, jd_text, model_name):
     system_prompt = """
 You are an expert, highly critical IT Recruiter.
 Compare the candidate's resume against the Job Description carefully.
@@ -103,8 +103,27 @@ No markdown. No code fences. Only raw JSON.
 """.strip()
 
     user_prompt = f"""Job Description:\n{jd_text}\n\nResume:\n{resume_text}"""
+    
+    # Internal helper to standardize error outputs
+    def _return_error(error_msg):
+        return {
+            "candidate_name": "",
+            "match_score": 0,
+            "is_match": False,
+            "matched_skills": [],
+            "missing_critical_skills": [],
+            "why_matched": "",
+            "why_not_matched": "",
+            "overall_summary": "",
+            "confidence_level": "low",
+            "reasoning": error_msg 
+        }
 
-    for i, key in enumerate(api_keys):  
+    # ==========================================
+    # STRATEGY 1: TRY OPENROUTER FIRST
+    # ==========================================
+    openrouter_error = ""
+    for i, key in enumerate(openrouter_keys):  
         try:  
             headers = {  
                 "Content-Type": "application/json",  
@@ -112,7 +131,6 @@ No markdown. No code fences. Only raw JSON.
                 "HTTP-Referer": "https://streamlit.io",  
                 "X-Title": "AI Resume Screener",  
             }  
-
             payload = {  
                 "model": model_name,  
                 "messages": [  
@@ -121,33 +139,14 @@ No markdown. No code fences. Only raw JSON.
                 ],  
                 "temperature": 0.0,  
             }  
-
-            response = requests.post(  
-                OPENROUTER_URL,  
-                headers=headers,  
-                json=payload,  
-                timeout=120,  
-            )  
+            response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=120)  
 
             if not response.ok:  
-                if i == len(api_keys) - 1:  
-                    return {  
-                        "candidate_name": "",  
-                        "is_match": False,  
-                        "reasoning": f"OpenRouter error {response.status_code}: {response.text}",  
-                        "match_score": 0,  
-                        "missing_critical_skills": [],  
-                        "matched_skills": [],  
-                        "why_matched": "",  
-                        "why_not_matched": "",  
-                        "overall_summary": "",  
-                        "confidence_level": "low",  
-                    }  
+                openrouter_error = f"OpenRouter status {response.status_code}: {response.text}"
                 continue  
 
             data = response.json()  
             result_text = data["choices"][0]["message"]["content"].strip()  
-
             result_text = result_text.replace("```json", "").replace("```", "").strip()  
 
             start_idx = result_text.find("{")  
@@ -156,38 +155,89 @@ No markdown. No code fences. Only raw JSON.
             if start_idx != -1 and end_idx != -1:  
                 clean_json_str = result_text[start_idx:end_idx + 1]  
                 parsed = json.loads(clean_json_str)  
-            else:  
-                raise ValueError(f"Model output did not contain valid JSON: {result_text}")  
-
-            score = int(parsed.get("match_score", 0))  
-
-            return {  
-                "candidate_name": parsed.get("candidate_name", ""),  
-                "match_score": score,  
-                "is_match": bool(parsed.get("is_match", False)),  
-                "matched_skills": normalize_list(parsed.get("matched_skills", [])),  
-                "missing_critical_skills": normalize_list(parsed.get("missing_critical_skills", [])),  
-                "why_matched": parsed.get("why_matched", ""),  
-                "why_not_matched": parsed.get("why_not_matched", ""),  
-                "overall_summary": parsed.get("overall_summary", ""),  
-                "confidence_level": parsed.get("confidence_level", confidence_label(score)),  
-            }  
-
-        except (requests.RequestException, KeyError, ValueError, json.JSONDecodeError) as e:  
-            if i == len(api_keys) - 1:  
+                
+                score = int(parsed.get("match_score", 0))  
                 return {  
-                    "candidate_name": "",  
-                    "is_match": False,  
-                    "reasoning": f"System Error: {str(e)}",  
-                    "match_score": 0,  
-                    "missing_critical_skills": [],  
-                    "matched_skills": [],  
-                    "why_matched": "",  
-                    "why_not_matched": "",  
-                    "overall_summary": "",  
-                    "confidence_level": "low",  
+                    "candidate_name": parsed.get("candidate_name", ""),  
+                    "match_score": score,  
+                    "is_match": bool(parsed.get("is_match", False)),  
+                    "matched_skills": normalize_list(parsed.get("matched_skills", [])),  
+                    "missing_critical_skills": normalize_list(parsed.get("missing_critical_skills", [])),  
+                    "why_matched": parsed.get("why_matched", ""),  
+                    "why_not_matched": parsed.get("why_not_matched", ""),  
+                    "overall_summary": parsed.get("overall_summary", ""),  
+                    "confidence_level": parsed.get("confidence_level", confidence_label(score)),  
                 }  
+            else:  
+                openrouter_error = "OpenRouter output did not contain valid JSON."
+                continue
+
+        except Exception as e:  
+            openrouter_error = f"OpenRouter Exception: {str(e)}"
             continue
+
+    # ==========================================
+    # STRATEGY 2: FALLBACK TO GEMINI
+    # ==========================================
+    if gemini_keys:
+        gemini_error = ""
+        for i, key in enumerate(gemini_keys):
+            try:
+                # Using Gemini's official REST API Endpoint
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
+                
+                payload = {
+                    "contents": [{
+                        "parts": [{"text": f"SYSTEM INSTRUCTIONS:\n{system_prompt}\n\nUSER PROMPT:\n{user_prompt}"}]
+                    }],
+                    "generationConfig": {
+                        "temperature": 0.0
+                    }
+                }
+                
+                response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=120)
+                
+                if not response.ok:
+                    gemini_error = f"Gemini status {response.status_code}: {response.text}"
+                    continue
+                    
+                data = response.json()
+                result_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                result_text = result_text.replace("```json", "").replace("```", "").strip()
+                
+                start_idx = result_text.find("{")  
+                end_idx = result_text.rfind("}")  
+
+                if start_idx != -1 and end_idx != -1:  
+                    clean_json_str = result_text[start_idx:end_idx + 1]  
+                    parsed = json.loads(clean_json_str)  
+                    
+                    score = int(parsed.get("match_score", 0))  
+                    return {  
+                        "candidate_name": parsed.get("candidate_name", ""),  
+                        "match_score": score,  
+                        "is_match": bool(parsed.get("is_match", False)),  
+                        "matched_skills": normalize_list(parsed.get("matched_skills", [])),  
+                        "missing_critical_skills": normalize_list(parsed.get("missing_critical_skills", [])),  
+                        "why_matched": parsed.get("why_matched", ""),  
+                        "why_not_matched": parsed.get("why_not_matched", ""),  
+                        "overall_summary": parsed.get("overall_summary", ""),  
+                        "confidence_level": parsed.get("confidence_level", confidence_label(score)),  
+                    } 
+                else:
+                    gemini_error = "Gemini output did not contain valid JSON."
+                    continue
+                    
+            except Exception as e:
+                gemini_error = f"Gemini Exception: {str(e)}"
+                continue
+                
+        # If both APIs exhaust their keys or fail entirely
+        return _return_error(f"Both APIs Failed. OpenRouter: {openrouter_error} | Gemini: {gemini_error}")
+        
+    # If OpenRouter fails and the user didn't provide a Gemini key for fallback
+    return _return_error(f"OpenRouter Failed ({openrouter_error}) and no Gemini API keys were configured for fallback.")
+
 
 def build_csv_bytes(rows):
     output = io.StringIO()
@@ -259,14 +309,21 @@ st.title("📄 AI-Powered Resume Screener")
 
 model_name = st.secrets.get("OPENROUTER_MODEL", DEFAULT_MODEL)
 
-api_keys = []
+# Dynamically collect OpenRouter and Gemini Keys
+openrouter_keys = []
 for idx in range(1, 10):
     key = st.secrets.get(f"OPENROUTER_API_KEY_{idx}")
     if key:
-        api_keys.append(key)
+        openrouter_keys.append(key)
 
-if not api_keys:
-    st.error("No API keys found! Please configure OPENROUTER_API_KEY_1 in Streamlit Secrets.")
+gemini_keys = []
+for idx in range(1, 10):
+    key = st.secrets.get(f"GEMINI_API_KEY_{idx}")
+    if key:
+        gemini_keys.append(key)
+
+if not openrouter_keys and not gemini_keys:
+    st.error("No API keys found! Please configure OPENROUTER_API_KEY_1 or GEMINI_API_KEY_1 in Streamlit Secrets.")
     st.stop()
 
 jd_text = st.text_area("Paste the Job Description (JD) here", height=200)
@@ -309,7 +366,8 @@ if st.button("Analyze Resumes", type="primary"):
             fallback_name = extract_candidate_name(resume_text, file.name)  
             
             with st.spinner(f"Analyzing {file.name} via AI..."):  
-                evaluation = evaluate_resume(api_keys, resume_text, jd_text, model_name)  
+                # Passing both lists of keys to the evaluate function
+                evaluation = evaluate_resume(openrouter_keys, gemini_keys, resume_text, jd_text, model_name)  
 
             candidate_name = evaluation.get("candidate_name") or fallback_name  
             score = int(evaluation.get("match_score", 0))  
@@ -325,7 +383,7 @@ if st.button("Analyze Resumes", type="primary"):
             expander_title = f"{'✅ MATCH' if is_match else '❌ REJECTED'} - {candidate_name} ({score}/100)"
             
             with st.expander(expander_title, expanded=is_match):
-                if "OpenRouter error" in evaluation.get("reasoning", "") or "System Error" in evaluation.get("reasoning", ""):  
+                if "Both APIs Failed" in evaluation.get("reasoning", "") or "OpenRouter Failed" in evaluation.get("reasoning", ""):  
                     st.warning("⚠️ Error while processing this resume.")  
                     st.write(f"**Details:** {evaluation.get('reasoning')}")  
                 else:  
