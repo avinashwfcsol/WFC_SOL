@@ -1,20 +1,8 @@
 import json
 import time
 import PyPDF2
+import requests
 import streamlit as st
-from pydantic import BaseModel, Field
-from typing import List
-from google import genai
-from google.genai import types
-
-# ==========================================
-# DEFINE STRICT AI OUTPUT SCHEMA (PYDANTIC)
-# ==========================================
-class CandidateEvaluation(BaseModel):
-    reasoning: str = Field(description="A brief, 2-sentence explanation of why this candidate fits or fails.")
-    missing_critical_skills: List[str] = Field(description="List of required skills from the JD missing in the resume.")
-    match_score: int = Field(description="Integer out of 100 based on core requirements met.")
-    is_match: bool = Field(description="Must be true ONLY if the match_score is 75 or higher.")
 
 # ==========================================
 # HELPER FUNCTIONS
@@ -31,55 +19,82 @@ def extract_text_from_pdf(uploaded_file):
         st.error(f"Error reading PDF: {e}")
     return text
 
-def evaluate_resume(client, resume_text, jd_text):
-    prompt = f"""
+def evaluate_resume(api_keys, resume_text, jd_text):
+    # We must explicitly instruct Grok to return raw JSON matching our app's logic
+    system_prompt = """
     You are an expert, highly critical IT Recruiter. Evaluate a candidate's resume against a Job Description (JD).
     You must not make errors or assumptions. If a skill is not in the resume, assume the candidate does not have it.
     
-    Job Description:
-    {jd_text}
+    You MUST return your evaluation strictly as a valid JSON object with the following exact keys:
+    - "reasoning": A brief, 2-sentence explanation of why this candidate fits or fails.
+    - "missing_critical_skills": A list of strings containing required skills from the JD missing in the resume.
+    - "match_score": An integer out of 100 based on core requirements met.
+    - "is_match": A boolean (true or false). Must be true ONLY if the match_score is 75 or higher.
     
-    Resume:
-    {resume_text}
+    Do not include markdown formatting like ```json, just output the raw JSON object.
     """
     
-    # SMART RETRY LOGIC: Limit to 10 tries, and ONLY retry on temporary 503/500 errors
-    max_retries = 10
-    for attempt in range(max_retries):
+    user_prompt = f"Job Description:\n{jd_text}\n\nResume:\n{resume_text}"
+
+    # API KEY ROTATION LOGIC
+    for i, key in enumerate(api_keys):
         try:
-            response = client.models.generate_content(
-                model='gemini-3.5-flash',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=CandidateEvaluation,
-                    temperature=0.0,
-                )
-            )
-            return json.loads(response.text)
+            # We use xAI's standard chat completions endpoint
+            url = "[https://api.x.ai/v1/chat/completions](https://api.x.ai/v1/chat/completions)"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}"
+            }
+            payload = {
+                "model": "grok-4.5",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.0
+            }
+            
+            response = requests.post(url, headers=headers, json=payload)
+            
+            # Catch Rate Limits (429) or Server Errors (500+) and rotate keys
+            if response.status_code == 429 or response.status_code >= 500:
+                if i == len(api_keys) - 1:
+                    return {"is_match": False, "reasoning": f"All API keys exhausted. Last Error Code: {response.status_code}", "match_score": 0, "missing_critical_skills": []}
+                continue # Instantly try the next key in the list
+                
+            response.raise_for_status() # Catch any other errors
+            
+            # Extract and clean the JSON text from Grok's response
+            result_text = response.json()["choices"][0]["message"]["content"]
+            result_text = result_text.replace("```json", "").replace("```", "").strip()
+            
+            return json.loads(result_text)
+            
         except Exception as e:
             error_message = str(e)
             
-            # If the error is 503 (Unavailable) or 500 (Internal Error), wait and retry
-            if "503" in error_message or "500" in error_message:
-                if attempt < max_retries - 1:
-                    time.sleep(10) # Wait 10 seconds, then try again
-                    continue
+            # If we just failed on the VERY LAST key in our list, give up
+            if i == len(api_keys) - 1:
+                return {"is_match": False, "reasoning": f"System Error: {error_message}", "match_score": 0, "missing_critical_skills": []}
             
-            # If it is ANY other error (like 429 Quota Exceeded), stop immediately and show the error!
-            return {"is_match": False, "reasoning": f"System Error: {error_message}", "match_score": 0, "missing_critical_skills": []}
+            # Otherwise, move to the next key
+            continue
 
 # ==========================================
 # STREAMLIT WEB APP UI
 # ==========================================
 st.set_page_config(page_title="AI Resume Screener", layout="wide")
-st.title("📄 AI-Powered Resume Screener")
+st.title("📄 Grok-Powered Resume Screener")
 
-# Securely grab the API key from Streamlit Cloud Secrets
-try:
-    API_KEY = st.secrets["GEMINI_API_KEY"]
-except KeyError:
-    st.error("API Key not found! Please configure it in Streamlit Secrets.")
+# Securely grab ALL API keys from Streamlit Secrets
+api_keys = []
+for idx in range(1, 10): 
+    key = st.secrets.get(f"GROK_API_KEY_{idx}")
+    if key:
+        api_keys.append(key)
+
+if not api_keys:
+    st.error("No API keys found! Please configure GROK_API_KEY_1 in Streamlit Secrets.")
     st.stop()
 
 jd_text = st.text_area("Paste the Job Description (JD) here", height=200)
@@ -91,7 +106,6 @@ if st.button("Analyze Resumes", type="primary"):
     elif not uploaded_files:
         st.warning("Please upload at least one resume.")
     else:
-        client = genai.Client(api_key=API_KEY)
         st.write("---")
         st.subheader("Evaluation Results")
         
@@ -102,24 +116,19 @@ if st.button("Analyze Resumes", type="primary"):
                     st.error("Could not extract text from this PDF.")
                     continue
                     
-                with st.spinner("Analyzing with Gemini AI..."):
-                    evaluation = evaluate_resume(client, resume_text, jd_text)
+                with st.spinner("Analyzing with Grok AI..."):
+                    evaluation = evaluate_resume(api_keys, resume_text, jd_text)
                 
-                # 1. Handle Server Errors gracefully
-                if "System Error" in evaluation.get("reasoning"):
-                    st.warning("⚠️ ERROR: Google blocked this request or quota was exceeded.")
+                if "All API keys exhausted" in evaluation.get("reasoning", ""):
+                    st.warning("⚠️ ERROR: All provided API keys have hit their rate limits.")
                     st.write(f"**Details:** {evaluation.get('reasoning')}")
-                
-                # 2. Handle Good Matches
                 elif evaluation.get("is_match"):
                     st.success(f"✅ MATCH! (Score: {evaluation.get('match_score')}/100)")
                     st.write(f"**Reasoning:** {evaluation.get('reasoning')}")
-                
-                # 3. Handle True Rejections
                 else:
-                    st.error(f"❌ REJECTED (Score: {evaluation.get('match_score')}/100)")
+                    st.error(f"❌ REJECTED (Score: {evaluation.get('match_score', 0)}/100)")
                     st.write(f"**Missing Skills:** {', '.join(evaluation.get('missing_critical_skills', []))}")
                     st.write(f"**Reasoning:** {evaluation.get('reasoning')}")
                 
-                # Maintain the healthy 5-second baseline speed limit between each resume
-                time.sleep(5)
+                # Pace the requests to avoid overwhelming the xAI servers
+                time.sleep(3)
