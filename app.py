@@ -177,14 +177,14 @@ No markdown. No code fences. Only raw JSON.
             continue
 
     # ==========================================
-    # STRATEGY 2: FALLBACK TO GEMINI
+    # STRATEGY 2: FALLBACK TO GEMINI WITH AUTO-RETRY
     # ==========================================
     if gemini_keys:
         gemini_error = ""
         for i, key in enumerate(gemini_keys):
             try:
-                # Using Gemini's official REST API Endpoint with the updated model version
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={key}"
+                # Correct, active endpoint for Gemini 1.5 Flash
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
                 
                 payload = {
                     "contents": [{
@@ -195,11 +195,31 @@ No markdown. No code fences. Only raw JSON.
                     }
                 }
                 
-                response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=120)
+                # --- AUTO-RETRY LOGIC START ---
+                max_retries = 3
+                response_successful = False
                 
-                if not response.ok:
-                    gemini_error = f"Gemini status {response.status_code}: {response.text}"
-                    continue
+                for attempt in range(max_retries):
+                    response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=120)
+                    
+                    if response.status_code == 503:
+                        # If Google is overloaded, wait 3 seconds and loop back to try again
+                        time.sleep(3)
+                        continue
+                    elif not response.ok:
+                        # A different error happened, stop retrying
+                        gemini_error = f"Gemini status {response.status_code}: {response.text}"
+                        break
+                    else:
+                        # Success!
+                        response_successful = True
+                        break
+                        
+                if not response_successful:
+                    if not gemini_error:
+                        gemini_error = f"Gemini status 503: Servers overloaded after {max_retries} retry attempts."
+                    continue # Try the next API key in your list if this one fails completely
+                # --- AUTO-RETRY LOGIC END ---
                     
                 data = response.json()
                 result_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -424,6 +444,7 @@ if st.button("Analyze Resumes", type="primary"):
                 "overall_summary": overall_summary,  
             })  
 
+            # Wait 5 seconds before hitting the API again to prevent rate limits
             time.sleep(5)  
 
             progress.progress(idx / total_files)  
