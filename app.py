@@ -38,15 +38,14 @@ def evaluate_resume(api_keys, resume_text, jd_text):
     # API KEY ROTATION LOGIC FOR OPENROUTER
     for i, key in enumerate(api_keys):
         try:
-            url = "[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)"
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {key}",
-                "HTTP-Referer": "[https://streamlit.io](https://streamlit.io)", # Optional for OpenRouter rankings
-                "X-Title": "AI Resume Screener"        # Optional for OpenRouter rankings
+                "HTTP-Referer": "[https://streamlit.io](https://streamlit.io)",
+                "X-Title": "AI Resume Screener"
             }
             payload = {
-                "model": "openai/gpt-4o", # You can change this to any OpenRouter model string
+                "model": "openai/gpt-4o",
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -54,7 +53,12 @@ def evaluate_resume(api_keys, resume_text, jd_text):
                 "temperature": 0.0
             }
             
-            response = requests.post(url, headers=headers, json=payload)
+            # Directly pass the URL string inside requests.post to avoid variable scope issues
+            response = requests.post(
+                "[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)", 
+                headers=headers, 
+                json=payload
+            )
             
             if response.status_code == 429 or response.status_code >= 500:
                 if i == len(api_keys) - 1:
