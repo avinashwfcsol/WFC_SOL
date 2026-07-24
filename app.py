@@ -20,7 +20,6 @@ def extract_text_from_pdf(uploaded_file):
     return text
 
 def evaluate_resume(api_keys, resume_text, jd_text):
-    # We must explicitly instruct Grok to return raw JSON matching our app's logic
     system_prompt = """
     You are an expert, highly critical IT Recruiter. Evaluate a candidate's resume against a Job Description (JD).
     You must not make errors or assumptions. If a skill is not in the resume, assume the candidate does not have it.
@@ -39,8 +38,7 @@ def evaluate_resume(api_keys, resume_text, jd_text):
     # API KEY ROTATION LOGIC
     for i, key in enumerate(api_keys):
         try:
-            # We use xAI's standard chat completions endpoint
-                        url = "https://api.x.ai/v1/chat/completions"
+            url = "[https://api.x.ai/v1/chat/completions](https://api.x.ai/v1/chat/completions)"
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {key}"
@@ -56,15 +54,13 @@ def evaluate_resume(api_keys, resume_text, jd_text):
             
             response = requests.post(url, headers=headers, json=payload)
             
-            # Catch Rate Limits (429) or Server Errors (500+) and rotate keys
             if response.status_code == 429 or response.status_code >= 500:
                 if i == len(api_keys) - 1:
                     return {"is_match": False, "reasoning": f"All API keys exhausted. Last Error Code: {response.status_code}", "match_score": 0, "missing_critical_skills": []}
-                continue # Instantly try the next key in the list
+                continue 
                 
-            response.raise_for_status() # Catch any other errors
+            response.raise_for_status()
             
-            # Extract and clean the JSON text from Grok's response
             result_text = response.json()["choices"][0]["message"]["content"]
             result_text = result_text.replace("```json", "").replace("```", "").strip()
             
@@ -72,19 +68,15 @@ def evaluate_resume(api_keys, resume_text, jd_text):
             
         except Exception as e:
             error_message = str(e)
-            
-            # If we just failed on the VERY LAST key in our list, give up
             if i == len(api_keys) - 1:
                 return {"is_match": False, "reasoning": f"System Error: {error_message}", "match_score": 0, "missing_critical_skills": []}
-            
-            # Otherwise, move to the next key
             continue
 
 # ==========================================
 # STREAMLIT WEB APP UI
 # ==========================================
 st.set_page_config(page_title="AI Resume Screener", layout="wide")
-st.title("📄 AI-Powered Resume Screener")
+st.title("📄 Grok-Powered Resume Screener")
 
 # Securely grab ALL API keys from Streamlit Secrets
 api_keys = []
@@ -130,5 +122,4 @@ if st.button("Analyze Resumes", type="primary"):
                     st.write(f"**Missing Skills:** {', '.join(evaluation.get('missing_critical_skills', []))}")
                     st.write(f"**Reasoning:** {evaluation.get('reasoning')}")
                 
-                # Pace the requests to avoid overwhelming the xAI servers
                 time.sleep(3)
