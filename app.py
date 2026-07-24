@@ -16,7 +16,6 @@ import streamlit as st
 # ==========================================
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "openrouter/free"   # free routing model
-MATCH_THRESHOLD = 75  # only for labeling as MATCH / NOT MATCH
 
 
 # ==========================================
@@ -222,7 +221,6 @@ def build_csv_bytes(rows):
         "why_matched",
         "why_not_matched",
         "overall_summary",
-        "jd_title",
     ])
     writer.writeheader()
     writer.writerows(rows)
@@ -262,7 +260,7 @@ def send_email_with_csv(csv_bytes, to_email, subject, body):
 # STREAMLIT WEB APP UI
 # ==========================================
 st.set_page_config(page_title="AI Resume Screener", layout="wide")
-st.title("📄 AI-Powered Resume Screener")
+st.title("📄 OpenRouter-Powered Resume Screener")
 
 model_name = st.secrets.get("OPENROUTER_MODEL", DEFAULT_MODEL)
 
@@ -276,9 +274,6 @@ if not api_keys:
     st.error("No API keys found! Please configure OPENROUTER_API_KEY_1 in Streamlit Secrets.")
     st.stop()
 
-st.caption(f"Using model: {model_name}")
-
-jd_title = st.text_input("Job Title (optional)", value="")
 jd_text = st.text_area("Paste the Job Description (JD) here", height=200)
 uploaded_files = st.file_uploader(
     "Upload Resumes (PDFs)",
@@ -288,7 +283,10 @@ uploaded_files = st.file_uploader(
 
 st.markdown("### Email Report")
 send_report_email = st.checkbox("Send CSV report by email after scanning", value=False)
-report_email_to = st.text_input("Recipient email", placeholder="recruiter@company.com")
+
+report_email_to = ""
+if send_report_email:
+    report_email_to = st.text_input("Recipient email", placeholder="recruiter@company.com")
 
 if st.button("Analyze Resumes", type="primary"):
     if not jd_text.strip():
@@ -370,7 +368,6 @@ if st.button("Analyze Resumes", type="primary"):
                     "why_matched": why_matched,
                     "why_not_matched": why_not_matched,
                     "overall_summary": overall_summary,
-                    "jd_title": jd_title.strip(),
                 })
 
                 time.sleep(5)
@@ -409,12 +406,11 @@ if st.button("Analyze Resumes", type="primary"):
                     st.warning("Please enter recipient email.")
                 else:
                     try:
-                        subject = f"Resume Screening Report - {jd_title or 'JD'}"
+                        subject = "Resume Screening Report"
                         body = (
                             f"Hello,\n\n"
                             f"Attached is the resume screening CSV report.\n"
-                            f"Scan Date: {scan_date}\n"
-                            f"Job Title: {jd_title or 'N/A'}\n\n"
+                            f"Scan Date: {scan_date}\n\n"
                             f"Regards,\nAI Resume Screener"
                         )
                         send_email_with_csv(
