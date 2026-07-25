@@ -166,7 +166,6 @@ def compute_final_assessment(model_data, jd_text):
     required_skills = normalize_list(model_data.get("required_skills", []))
     preferred_skills = normalize_list(model_data.get("preferred_skills", []))
 
-    # Hidden fallback if the model fails to split the JD.
     if not required_skills and not preferred_skills:
         fallback_required, fallback_preferred = heuristic_jd_split(jd_text)
         required_skills = fallback_required
@@ -185,7 +184,6 @@ def compute_final_assessment(model_data, jd_text):
     else:
         missing_preferred = normalize_list(model_data.get("missing_preferred_skills", []))
 
-    # If the model returned matched_skills, keep it as a union fallback.
     matched_skills = normalize_list(model_data.get("matched_skills", []))
     if not matched_skills:
         matched_skills = dedupe_preserve_order(matched_required + matched_preferred)
@@ -385,29 +383,23 @@ Resume:
 
 def build_csv_bytes(rows):
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=[
-        "rank",
-        "scan_date",
-        "candidate_name",
-        "file_name",
-        "match_score",
-        "required_coverage",
-        "preferred_coverage",
-        "final_decision",
-        "match_percentage",
-        "match_status",
-        "recommendation",
-        "confidence_level",
-        "matched_required_skills",
-        "missing_required_skills",
-        "matched_preferred_skills",
-        "missing_preferred_skills",
-        "matched_skills",
-        "why_matched",
-        "why_review",
-        "why_not_matched",
-        "overall_summary",
-    ])
+    # UPDATED: Enforcing the exact 13 columns in order
+    fieldnames = [
+        "Rank",
+        "Scan Date",
+        "Candidate Name",
+        "File Name",
+        "Match %",
+        "Match Status",
+        "Recommendation",
+        "Confidence Level",
+        "Why matched",
+        "Why Rejected",
+        "Matched Skills",
+        "Missing Skills",
+        "Summary"
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue().encode("utf-8")
@@ -556,42 +548,46 @@ if st.button("Analyze Resumes", type="primary"):
                     else:
                         st.write(f"**Why Not Matched:** {why_not_matched or evaluation.get('decision_reason', 'Details not provided')}")
 
-                    st.write(f"**Summary:** {overall_summary or 'Not provided'}")
-
+                    # UPDATED: Placed skills above summary
                     st.write(f"**Matched Skills:** {', '.join(ui_matched_skills) if ui_matched_skills else 'None found'}")
                     st.write(f"**Missing Skills:** {', '.join(ui_missing_skills) if ui_missing_skills else 'None found'}")
+                    
+                    # UPDATED: Made sure Summary is exactly last
+                    st.write(f"**Summary:** {overall_summary or 'Not provided'}")
 
+            # Mapping 'Why Rejected' to either rejection or review reason (left blank if Matched)
+            why_rejected_value = ""
+            if final_decision == "REJECTED":
+                why_rejected_value = why_not_matched
+            elif final_decision == "REVIEW":
+                why_rejected_value = why_review
+
+            # UPDATED: Dictionary corresponds exactly to the 13 required columns
             rows.append({
-                "scan_date": scan_date,
-                "candidate_name": candidate_name,
-                "file_name": file.name,
-                "match_score": score,
-                "required_coverage": evaluation.get("required_coverage", 0),
-                "preferred_coverage": evaluation.get("preferred_coverage", 0),
-                "final_decision": final_decision,
-                "match_percentage": f"{score}%",
-                "match_status": final_decision,
-                "recommendation": recommendation,
-                "confidence_level": confidence_level,
-                "matched_required_skills": ", ".join(matched_required_skills) if matched_required_skills else "",
-                "missing_required_skills": ", ".join(missing_required_skills) if missing_required_skills else "",
-                "matched_preferred_skills": ", ".join(matched_preferred_skills) if matched_preferred_skills else "",
-                "missing_preferred_skills": ", ".join(missing_preferred_skills) if missing_preferred_skills else "",
-                "matched_skills": ", ".join(ui_matched_skills) if ui_matched_skills else "",
-                "why_matched": why_matched if final_decision == "MATCH" else "",
-                "why_review": why_review if final_decision == "REVIEW" else "",
-                "why_not_matched": why_not_matched if final_decision == "REJECTED" else "",
-                "overall_summary": overall_summary,
+                "Rank": 0, # Placeholder, will assign rank after sorting
+                "Scan Date": scan_date,
+                "Candidate Name": candidate_name,
+                "File Name": file.name,
+                "Match %": f"{score}%",
+                "Match Status": final_decision,
+                "Recommendation": recommendation,
+                "Confidence Level": confidence_level,
+                "Why matched": why_matched if final_decision == "MATCH" else "",
+                "Why Rejected": why_rejected_value,
+                "Matched Skills": ", ".join(ui_matched_skills) if ui_matched_skills else "",
+                "Missing Skills": ", ".join(ui_missing_skills) if ui_missing_skills else "",
+                "Summary": overall_summary,
             })
 
             time.sleep(5)
 
             progress.progress(idx / total_files)
 
-        rows.sort(key=lambda x: x["match_score"], reverse=True)
+        # UPDATED: Sort by peeling the "%" off of Match % string
+        rows.sort(key=lambda x: int(x["Match %"].replace("%", "")), reverse=True)
 
         for i, row in enumerate(rows, start=1):
-            row["rank"] = i
+            row["Rank"] = i
 
         st.write("---")
         st.subheader("Ranked Report (Highest Match to Lowest Match)")
@@ -606,7 +602,6 @@ if st.button("Analyze Resumes", type="primary"):
                 mime="text/csv",
             )
             
-            # Replaced the try/except pandas block with native Streamlit dataframe to prevent messy JSON output
             st.dataframe(rows, use_container_width=True)
 
             if send_report_email:
