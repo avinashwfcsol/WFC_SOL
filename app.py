@@ -521,7 +521,10 @@ if st.button("Analyze Resumes", type="primary"):
             missing_required_skills = evaluation.get("missing_required_skills", [])
             matched_preferred_skills = evaluation.get("matched_preferred_skills", [])
             missing_preferred_skills = evaluation.get("missing_preferred_skills", [])
-            matched_skills = evaluation.get("matched_skills", [])
+            
+            # Combine skills for simple UI display
+            ui_matched_skills = dedupe_preserve_order(matched_required_skills + matched_preferred_skills)
+            ui_missing_skills = dedupe_preserve_order(missing_required_skills + missing_preferred_skills)
 
             why_matched = evaluation.get("why_matched", "")
             why_review = evaluation.get("why_review", "")
@@ -543,11 +546,8 @@ if st.button("Analyze Resumes", type="primary"):
                     st.write(f"**Details:** {evaluation.get('reasoning')}")
                 else:
                     st.write(f"**Candidate Name:** {candidate_name}")
-                    st.write(f"**Final Decision:** {final_decision}")
                     st.write(f"**Recommendation:** {recommendation}")
-                    st.write(f"**Confidence:** {confidence_level.capitalize()}")
-                    st.write(f"**Required Coverage:** {evaluation.get('required_coverage', 0)}%")
-                    st.write(f"**Preferred Coverage:** {evaluation.get('preferred_coverage', 0)}%")
+                    st.write(f"**Confidence:** {confidence_level}")
 
                     if final_decision == "MATCH":
                         st.write(f"**Why Matched:** {why_matched or evaluation.get('decision_reason', 'Details not provided')}")
@@ -558,11 +558,8 @@ if st.button("Analyze Resumes", type="primary"):
 
                     st.write(f"**Summary:** {overall_summary or 'Not provided'}")
 
-                    st.write(f"**Matched Required Skills:** {', '.join(matched_required_skills) if matched_required_skills else 'None found'}")
-                    st.write(f"**Missing Required Skills:** {', '.join(missing_required_skills) if missing_required_skills else 'None found'}")
-                    st.write(f"**Matched Preferred Skills:** {', '.join(matched_preferred_skills) if matched_preferred_skills else 'None found'}")
-                    st.write(f"**Missing Preferred Skills:** {', '.join(missing_preferred_skills) if missing_preferred_skills else 'None found'}")
-                    st.write(f"**Matched Skills:** {', '.join(matched_skills) if matched_skills else 'None found'}")
+                    st.write(f"**Matched Skills:** {', '.join(ui_matched_skills) if ui_matched_skills else 'None found'}")
+                    st.write(f"**Missing Skills:** {', '.join(ui_missing_skills) if ui_missing_skills else 'None found'}")
 
             rows.append({
                 "scan_date": scan_date,
@@ -580,19 +577,17 @@ if st.button("Analyze Resumes", type="primary"):
                 "missing_required_skills": ", ".join(missing_required_skills) if missing_required_skills else "",
                 "matched_preferred_skills": ", ".join(matched_preferred_skills) if matched_preferred_skills else "",
                 "missing_preferred_skills": ", ".join(missing_preferred_skills) if missing_preferred_skills else "",
-                "matched_skills": ", ".join(matched_skills) if matched_skills else "",
+                "matched_skills": ", ".join(ui_matched_skills) if ui_matched_skills else "",
                 "why_matched": why_matched if final_decision == "MATCH" else "",
                 "why_review": why_review if final_decision == "REVIEW" else "",
                 "why_not_matched": why_not_matched if final_decision == "REJECTED" else "",
                 "overall_summary": overall_summary,
             })
 
-            # Time limit added here to prevent hitting API rate limits
             time.sleep(5)
 
             progress.progress(idx / total_files)
 
-        # Highest score first
         rows.sort(key=lambda x: x["match_score"], reverse=True)
 
         for i, row in enumerate(rows, start=1):
@@ -610,13 +605,9 @@ if st.button("Analyze Resumes", type="primary"):
                 file_name="resume_screening_report.csv",
                 mime="text/csv",
             )
-
-            try:
-                import pandas as pd
-                df = pd.DataFrame(rows)
-                st.dataframe(df, use_container_width=True)
-            except Exception:
-                st.json(rows)
+            
+            # Replaced the try/except pandas block with native Streamlit dataframe to prevent messy JSON output
+            st.dataframe(rows, use_container_width=True)
 
             if send_report_email:
                 if not report_email_to.strip():
